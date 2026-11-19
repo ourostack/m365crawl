@@ -85,7 +85,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(format('[{0}{1}]', '{"name":"ubuntu-latest race 1/4","os":"ubuntu-latest","shard":1},{"name":"ubuntu-latest race 2/4","os":"ubuntu-latest","shard":2},{"name":"ubuntu-latest race 3/4","os":"ubuntu-latest","shard":3},{"name":"ubuntu-latest race 4/4","os":"ubuntu-latest","shard":4},{"name":"windows-latest","os":"windows-latest","coverprofile":"coverage-windows.out"}', github.event_name != 'pull_request' && ',{"name":"macos-latest","os":"macos-latest","coverprofile":"coverage.out","e2e":true}' || '')) }}
+        include: ${{ fromJSON(format('[{0}{1}]', '{"name":"ubuntu-latest race 1/4","os":"ubuntu-latest","shard":1},{"name":"ubuntu-latest race 2/4","os":"ubuntu-latest","shard":2},{"name":"ubuntu-latest race 3/4","os":"ubuntu-latest","shard":3},{"name":"ubuntu-latest race 4/4","os":"ubuntu-latest","shard":4}', github.event_name != 'pull_request' && github.event_name != 'merge_group' && ',{"name":"windows-latest","os":"windows-latest","coverprofile":"coverage-windows.out"},{"name":"macos-latest","os":"macos-latest","coverprofile":"coverage.out","e2e":true}' || '')) }}
     name: test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ matrix.e2e && 25 || 20 }}
@@ -160,13 +160,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            e2e-command: make e2e
-            require-browser: ""
-          - os: windows-latest
-            e2e-command: go test -count=1 -tags e2e ./e2e/...
-            require-browser: "1"
+        include: ${{ fromJSON(format('[{0}{1}]', '{"os":"ubuntu-latest","e2e-command":"make e2e","require-browser":""}', github.event_name != 'pull_request' && github.event_name != 'merge_group' && ',{"os":"windows-latest","e2e-command":"go test -count=1 -tags e2e ./e2e/...","require-browser":"1"}' || '')) }}
     name: e2e (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
