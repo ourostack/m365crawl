@@ -4,8 +4,8 @@
     {
       "id": "ourostack-ouro-ui-ax",
       "repository": "ourostack/ouro-ui",
-      "commit": "da34744e5c8f0ba18102715d0e5e3bf19fb0e8ec",
-      "release": "v1.3.340",
+      "commit": "0ee703c27e0cd4b350ab753cd07b7077ed8e94a3",
+      "release": "v1.3.341",
       "license": "MIT",
       "files": [
         { "sourcePath": "registry/ouro/ax/checks.ts", "generatedPath": "tools/ouro-ax/checks.ts", "sha256": "21f7f2dd63a86ce58447c7af3b02dc00069df43620bee53c71b0faa3697a0ff4" },
@@ -41,13 +41,13 @@
     {
       "id": "ourostack-ouro-ui-core-actions",
       "repository": "ourostack/ouro-ui-core",
-      "commit": "bf3190fdb220c2187bf47c83965b5f85e001f848",
-      "release": "v1.0.0",
+      "commit": "2fab8a308f72381f0bcb244722cc10976fd27d14",
+      "release": "v1.1.0",
       "license": "MIT",
       "files": [
-        { "sourcePath": "dist/actions/ouro-actions.mts", "generatedPath": "tools/ouro-actions/ouro-actions.mts", "sha256": "667d5828606e2b51bfd9300b52c89a000270da18317f4c293e3acb8a67ddbad8" },
+        { "sourcePath": "dist/actions/ouro-actions.mts", "generatedPath": "tools/ouro-actions/ouro-actions.mts", "sha256": "be03f4d1d35e741b4fca692ab7d6a1dce57bc666a6c46a7a440f94cb99e4f5c8" },
         { "sourcePath": "dist/ax/actions.claims.json", "generatedPath": "tools/ouro-actions/actions.claims.json", "sha256": "944f48be5f9409dd70e0774dfe4976fef9cc3ba3f4ab4b9231df428700523f1a" },
-        { "sourcePath": "dist-manifest.json", "generatedPath": "tools/ouro-actions/dist-manifest.json", "sha256": "1390328efffcb9012306cf42324db9108432a60d48c27a08e47f8322f8a3f9d4" }
+        { "sourcePath": "dist-manifest.json", "generatedPath": "tools/ouro-actions/dist-manifest.json", "sha256": "78ffe9a1f201c1b54d90c66f3dc23731cb2da91a126ca5dadd598037fa95bd75" }
       ]
     }
   ]
