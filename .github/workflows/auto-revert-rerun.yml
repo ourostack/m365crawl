@@ -1,0 +1,25 @@
+name: Re-run red main once
+
+# Re-runs the failed jobs of a red main run once, with this repository's own GITHUB_TOKEN (actions write is all it needs).
+# Reverts stay with the central auto-revert, whose token opens PRs that start the required checks.
+# Rule: ourostack/.github tools/red-main/README.md.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: "4-59/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+  checks: read
+  pull-requests: read
+
+jobs:
+  rerun:
+    uses: ourostack/.github/.github/workflows/auto-revert-reusable.yml@main
+    with:
+      rerun-only: true
