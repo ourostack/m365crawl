@@ -1,5 +1,5 @@
 {
-  "generator": "ouro-actions 0.16.0",
+  "generator": "ouro-actions 1.4.1",
   "set": "m365crawl",
   "tools": [
     {
@@ -592,6 +592,9 @@
         "readOnlyHint": false,
         "destructiveHint": true,
         "openWorldHint": true
+      },
+      "_meta": {
+        "ouro.bot/confirm": "Send a plain-text Teams chat message the person directed, through WorkIQ."
       }
     },
     {
@@ -624,6 +627,9 @@
         "readOnlyHint": false,
         "destructiveHint": true,
         "openWorldHint": true
+      },
+      "_meta": {
+        "ouro.bot/confirm": "Reply in plain text to one mail as the person directed."
       }
     },
     {
@@ -640,6 +646,9 @@
         "readOnlyHint": false,
         "destructiveHint": true,
         "openWorldHint": true
+      },
+      "_meta": {
+        "ouro.bot/confirm": "Reply to everyone on one mail in plain text as the person directed."
       }
     },
     {
@@ -656,6 +665,9 @@
         "readOnlyHint": false,
         "destructiveHint": true,
         "openWorldHint": true
+      },
+      "_meta": {
+        "ouro.bot/confirm": "Send a new plain-text mail the person directed."
       }
     },
     {
@@ -688,6 +700,9 @@
         "readOnlyHint": false,
         "destructiveHint": true,
         "openWorldHint": true
+      },
+      "_meta": {
+        "ouro.bot/confirm": "Add the person's emoji reaction to one chat message as the person directed."
       }
     },
     {
@@ -704,6 +719,9 @@
         "readOnlyHint": false,
         "destructiveHint": true,
         "openWorldHint": true
+      },
+      "_meta": {
+        "ouro.bot/confirm": "Remove the person's emoji reaction from one chat message as the person directed."
       }
     },
     {
