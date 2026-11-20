@@ -85,7 +85,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(format('[{0}{1}]', '{"name":"ubuntu-latest race 1/4","os":"ubuntu-latest","shard":1},{"name":"ubuntu-latest race 2/4","os":"ubuntu-latest","shard":2},{"name":"ubuntu-latest race 3/4","os":"ubuntu-latest","shard":3},{"name":"ubuntu-latest race 4/4","os":"ubuntu-latest","shard":4}', github.event_name != 'pull_request' && github.event_name != 'merge_group' && ',{"name":"windows-latest","os":"windows-latest","coverprofile":"coverage-windows.out"},{"name":"macos-latest","os":"macos-latest","coverprofile":"coverage.out","e2e":true}' || '')) }}
+        include: ${{ fromJSON(format('[{0}{1}]', '{"name":"ubuntu-latest race 1/8","os":"ubuntu-latest","shard":1},{"name":"ubuntu-latest race 2/8","os":"ubuntu-latest","shard":2},{"name":"ubuntu-latest race 3/8","os":"ubuntu-latest","shard":3},{"name":"ubuntu-latest race 4/8","os":"ubuntu-latest","shard":4},{"name":"ubuntu-latest race 5/8","os":"ubuntu-latest","shard":5},{"name":"ubuntu-latest race 6/8","os":"ubuntu-latest","shard":6},{"name":"ubuntu-latest race 7/8","os":"ubuntu-latest","shard":7},{"name":"ubuntu-latest race 8/8","os":"ubuntu-latest","shard":8}', github.event_name != 'pull_request' && github.event_name != 'merge_group' && ',{"name":"windows-latest","os":"windows-latest","coverprofile":"coverage-windows.out"},{"name":"macos-latest","os":"macos-latest","coverprofile":"coverage.out","e2e":true}' || '')) }}
     name: test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ matrix.e2e && 25 || 20 }}
@@ -114,7 +114,7 @@ jobs:
           "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
       - name: Test with the race detector
         if: matrix.shard
-        run: make test-shard SHARD=${{ matrix.shard }} SHARDS=4
+        run: make test-shard SHARD=${{ matrix.shard }} SHARDS=8
       - name: Test with coverage
         if: matrix.coverprofile
         shell: bash
