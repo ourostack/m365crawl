@@ -7,6 +7,11 @@ on:
       - main
   merge_group:
   workflow_dispatch:
+    inputs:
+      image-publication-stress:
+        description: Repeat the image publication failure test 100 times with the race detector on macOS
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -119,6 +124,9 @@ jobs:
         if: matrix.coverprofile
         shell: bash
         run: go test -count=1 -timeout 15m -coverprofile=${{ matrix.coverprofile }} ./...
+      - name: Repeat image publication failure tests
+        if: runner.os == 'macOS' && inputs.image-publication-stress
+        run: go test -race -count=100 -run '^TestImagePublishedThenCancelledOrStdoutFailed$' ./internal/cli
       - name: Enforce 100% function coverage
         if: runner.os == 'macOS'
         env:

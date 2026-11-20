@@ -314,6 +314,7 @@ func TestImagePublishedThenCancelledOrStdoutFailed(t *testing.T) {
 			e, _ := imageNativeEnv(t, "good")
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
+			var attemptedOut bytes.Buffer
 			writer := imageResultFaultWriter{}
 			if mode == "cancelled" {
 				writer.cancel = cancel
@@ -321,16 +322,21 @@ func TestImagePublishedThenCancelledOrStdoutFailed(t *testing.T) {
 			var stderr bytes.Buffer
 			var errWriter io.Writer = &stderr
 			if mode == "both-streams-fail" {
-				errWriter = imageResultFaultWriter{}
+				errWriter = io.MultiWriter(&stderr, imageResultFaultWriter{})
 			}
 			output := filepath.Join(imageOutputDir(t), "retained.png")
-			code := runCLI(ctx, imageFetchArgs(e, output), writer, errWriter)
+			code := runCLI(ctx, imageFetchArgs(e, output), io.MultiWriter(&attemptedOut, writer), errWriter)
 			if code == 0 || code == 2 {
 				t.Fatalf("result-write failure did not preserve nonzero outcome: %d %s", code, &stderr)
 			}
 			data, err := os.ReadFile(output) // #nosec G304 -- Exact retained synthetic PNG destination after controlled failure.
 			if err != nil || !bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")) {
-				t.Fatalf("post-publication failure removed complete destination: %v", err)
+				left, listErr := os.ReadDir(filepath.Dir(output))
+				names := make([]string, 0, len(left))
+				for _, f := range left {
+					names = append(names, f.Name())
+				}
+				t.Fatalf("image missing after result-write failure: %v (exit %d, directory %v, listing error %v, attempted stdout %q, attempted stderr %q)", err, code, names, listErr, attemptedOut.String(), stderr.String())
 			}
 			if mode == "both-streams-fail" {
 				return
