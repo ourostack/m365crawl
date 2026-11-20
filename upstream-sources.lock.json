@@ -4,8 +4,8 @@
     {
       "id": "ourostack-ouro-ui-ax",
       "repository": "ourostack/ouro-ui",
-      "commit": "171743e6a2c57b0007d868d079ede22e8c658b42",
-      "release": "v1.3.379",
+      "commit": "de3a6dde79c32b42aa783a58480b85d417f8f0c0",
+      "release": "v1.3.381",
       "license": "MIT",
       "files": [
         { "sourcePath": "registry/ouro/ax/checks.ts", "generatedPath": "tools/ouro-ax/checks.ts", "sha256": "21f7f2dd63a86ce58447c7af3b02dc00069df43620bee53c71b0faa3697a0ff4" },
