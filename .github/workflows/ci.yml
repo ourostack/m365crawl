@@ -26,6 +26,22 @@ env:
   GOWORK: "off"
 
 jobs:
+  image-publication-stress:
+    if: github.event_name == 'workflow_dispatch' && inputs.image-publication-stress
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Repeat image publication failure tests
+        run: go test -race -count=100 -run '^TestImagePublishedThenCancelledOrStdoutFailed$' ./internal/cli
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -124,9 +140,6 @@ jobs:
         if: matrix.coverprofile
         shell: bash
         run: go test -count=1 -timeout 15m -coverprofile=${{ matrix.coverprofile }} ./...
-      - name: Repeat image publication failure tests
-        if: runner.os == 'macOS' && inputs.image-publication-stress
-        run: go test -race -count=100 -run '^TestImagePublishedThenCancelledOrStdoutFailed$' ./internal/cli
       - name: Enforce 100% function coverage
         if: runner.os == 'macOS'
         env:
