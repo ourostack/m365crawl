@@ -198,15 +198,31 @@ func newClass[T any](id, tag uint16, refuse bool, mapf func(hxstore.Object) (T, 
 
 func (c *class[T]) base() *classBase { return &c.classBase }
 
+// knows says whether tag is a measured layout of the class.
+func (c *classBase) knows(tag uint16) bool {
+	if tag == c.tag {
+		return true
+	}
+	switch c.id {
+	case ClassHeader:
+		return tag == TagHeaderExtended
+	case ClassFolder:
+		return tag == TagFolderExtended
+	case ClassBody:
+		return tag == TagBodyExtended || tag == TagBodyWide
+	case ClassDetail:
+		return tag == TagDetailExtended
+	}
+	return false
+}
+
 // see offers o to the class.
 func (c *class[T]) see(o hxstore.Object, res *Result) bool {
 	if o.Class != c.id {
 		return false
 	}
 	switch {
-	case o.Tag != c.tag && (c.id != ClassFolder || o.Tag != TagFolderExtended) &&
-		(c.id != ClassBody || o.Tag != TagBodyExtended) &&
-		(c.id != ClassDetail || o.Tag != TagDetailExtended):
+	case !c.knows(o.Tag):
 		c.badTags[o.Tag]++
 	case o.Resynced:
 		// An object reached after unknown bytes is a real object: when it maps cleanly it
@@ -226,7 +242,7 @@ func (c *class[T]) see(o hxstore.Object, res *Result) bool {
 	default:
 		c.keep(o)
 	}
-	if o.Class == ClassHeader && o.Tag == TagHeader {
+	if o.Class == ClassHeader && c.knows(o.Tag) {
 		res.Notes.HeadersSeen++
 	}
 	return true
