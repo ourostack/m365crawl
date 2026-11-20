@@ -70,8 +70,9 @@ func (c *candidate) offer(flagged bool, pos, n int) {
 // the pair differ between variants of the record, so none is pinned.
 func MapBody(o hxstore.Object) Body {
 	fixed := TagBody
-	if o.Tag == TagBodyExtended {
-		fixed = TagBodyExtended
+	switch o.Tag {
+	case TagBodyExtended, TagBodyWide:
+		fixed = int(o.Tag)
 	}
 	f, err := newFields(o, fixed)
 	if err != nil {

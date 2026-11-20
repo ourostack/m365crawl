@@ -20,19 +20,22 @@ import (
 // MapperVersion is raised whenever a mapping change alters derived mail data, so the archive can
 // re-read the store. Version 2 stopped labelling folders of the generic type 0x7a as junk;
 // version 3 reads the measured extended folder layout; version 4 reads extended bodies;
-// version 5 reads the measured extended detail layout.
-const MapperVersion = 5
+// version 5 reads the measured extended detail layout; version 6 reads the measured extended
+// header and body layouts (0x431 and 0x762).
+const MapperVersion = 6
 
 // Class and tag of each mapped object. The tag is the size of the fixed region.
 const (
 	ClassHeader       = 0x4f
 	TagHeader         = 0x430
+	TagHeaderExtended = 0x431
 	ClassDetail       = 0xc9
 	TagDetail         = 0x60f
 	TagDetailExtended = 0x610
 	ClassBody         = 0xca
 	TagBody           = 0x74e
 	TagBodyExtended   = 0x752
+	TagBodyWide       = 0x762
 	ClassAttachment   = 0x16a
 	TagAttachment     = 0x318
 	ClassFolder       = 0x4d
@@ -165,11 +168,18 @@ func word(o hxstore.Object, off int) uint32 {
 	return v
 }
 
-// MapHeader maps a class 0x4f object. The sender is the address at +940 (+912 is the list
+// MapHeader maps a class 0x4f object of the measured 0x430 or 0x431 layout. They keep every
+// mapped word at the same offset and differ in the fixed size, and so the string base; the
+// 0x431 flag byte is not established, so its flag is unknown. The sender is the address at +940 (+912 is the list
 // column's address and is ignored). A time that is unset, the max-ticks sentinel or out of
 // range is the zero time.
 func MapHeader(o hxstore.Object) (Header, error) {
-	f, err := newFields(o, TagHeader)
+	switch o.Tag {
+	case TagHeader, TagHeaderExtended:
+	default:
+		return Header{}, unmapped("unknown header layout")
+	}
+	f, err := newFields(o, int(o.Tag))
 	if err != nil {
 		return Header{}, err
 	}
@@ -192,8 +202,11 @@ func MapHeader(o hxstore.Object) (Header, error) {
 	default:
 		h.ReadState = "unknown" // 2 to 7 were seen and mean nothing known
 	}
-	flag, _ := o.U8(hdFlag)
-	h.Flag = pick(uint32(flag), "none", "complete", "flagged")
+	h.Flag = "unknown" // the 0x431 flag byte is not established, see docs/outlook-store.md
+	if o.Tag == TagHeader {
+		flag, _ := o.U8(hdFlag)
+		h.Flag = pick(uint32(flag), "none", "complete", "flagged")
+	}
 	h.Importance = pick(word(o, hdImportant), "low", "normal", "high")
 	return h, nil
 }
@@ -211,7 +224,7 @@ func pick(v uint32, names ...string) string {
 // calendar ids have. Anything that is not whole hex text is no id.
 func inviteID(o hxstore.Object) string {
 	w, l := int64(word(o, hdICal)), int64(word(o, hdICal+4)&lengthMask)
-	raw, ok := o.Bytes(int(w)+TagHeader, int(l))
+	raw, ok := o.Bytes(int(w)+int(o.Tag), int(l))
 	if l == 0 || !ok || l%2 != 0 {
 		return ""
 	}
