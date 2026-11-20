@@ -4,6 +4,27 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-20
+
+### Added
+
+- `m365crawl help --json` prints every command with who sees its effect (`private` or `others`), whether it only reads, and the exit codes the CLI gives.
+- Every write takes `--why` (the same as `--reason`), and `--dry-run` previews a write: the outcome it would have, with who would see it and the text, and nothing is sent or changed.
+- `m365crawl watch <chat> --timeout DURATION` waits for a new message in one chat and answers a `wait/1` document, with a `--cursor` to wait again from where it stopped.
+
+### Changed
+
+- The directed-actions v0 contract gains a "For tool authors" section: a tool gives every case's answer, code included, and never ignores a field it was given. It says why the writes switch refuses as `person_only`, why `identity` and `contract` are required on a single-account tool, what `expected_version` versions for each target, and why recipients and the audience check apply to Teams sends and reactions. No rule or case changes.
+
+### Fixed
+
+- `m365crawl edit`, `delete` and `remove` change nothing and name the command that does the real change.
+- A closed pipe (`m365crawl --help | head`) ends with a usage status instead of being killed by a signal.
+- Browser commands that start with an already-cancelled context no longer risk running or closing the connection used by later calls.
+- `content fetch image` no longer refuses inline PNGs solely because the archived message is a Teams standard/private channel root post. Select the team with `--team-id TEAM` or a message link's `groupId`; original selected PNG bytes retain native user/tenant/team/channel/message provenance, before/after checks and existing integrity/output protections. Receipts include `team_id` only for channel acquisitions. Shared channels and replies remain unsupported; native channel endpoint/shape qualification is not yet established.
+- Outlook for Mac mail reads no longer fail with `outlook_mail_layout_unsupported` on stores that use the `0x431` message header and `0x762` body layouts (seen since 2026-11-12). Every other unknown layout is still refused. The `0x431` header carries no established flag byte, so the message `flag` reads `unknown` for those messages; the next sync re-reads the store (mapper version 6).
+- `content fetch stream` on a Stream file with several transcripts and no `--transcript-id` now lists the native `transcript_candidates` (ID plus native display name, language tag and creation-time labels, never download URLs), each with an exact `next` fetch command. Before, the report said a selection was required but gave no way to learn the transcript IDs. Fetch still never picks a transcript, and archived selection-required observations without candidates stay valid.
+
 ## [1.6.0] - 2026-11-05
 
 ### Added
