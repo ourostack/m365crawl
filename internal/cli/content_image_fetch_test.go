@@ -330,7 +330,12 @@ func TestImagePublishedThenCancelledOrStdoutFailed(t *testing.T) {
 			}
 			data, err := os.ReadFile(output) // #nosec G304 -- Exact retained synthetic PNG destination after controlled failure.
 			if err != nil || !bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")) {
-				t.Fatalf("post-publication failure removed complete destination: %v", err)
+				left, _ := os.ReadDir(filepath.Dir(output))
+				names := make([]string, 0, len(left))
+				for _, f := range left {
+					names = append(names, f.Name())
+				}
+				t.Fatalf("post-publication failure removed complete destination: %v (exit %d, directory %v, stderr %q)", err, code, names, stderr.String())
 			}
 			if mode == "both-streams-fail" {
 				return
