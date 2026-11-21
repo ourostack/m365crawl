@@ -21,7 +21,56 @@ env:
   GOWORK: "off"
 
 jobs:
+  # The merge queue builds the pull request's commit on top of the current main. When that commit
+  # has exactly the tree the pull request's own passing run already tested, a second full run adds
+  # nothing, so the queue skips the jobs below and `ci-ok` accepts the pull request run's result.
+  # Any difference (main moved, an earlier entry in the queue) or any doubt (no run found, an API
+  # failure) leaves `skip` unset and the full run happens. Pushes to main always run in full.
+  gate:
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      skip: ${{ steps.gate.outputs.skip }}
+    steps:
+      - name: Does a passing pull request run already cover this tree?
+        id: gate
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          QUEUE_SHA: ${{ github.sha }}
+          HEAD_REF: ${{ github.event.merge_group.head_ref }}
+        run: |
+          set -euo pipefail
+          head_sha="${HEAD_REF##*-}"
+          queue_tree="$(gh api "repos/$REPO/git/commits/$QUEUE_SHA" --jq .tree.sha)"
+          run_id="$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?event=pull_request&head_sha=$head_sha&status=success&per_page=1" --jq '.workflow_runs[0].id // empty')"
+          if [ -z "$run_id" ]; then
+            echo "no passing pull request run for $head_sha: full run"
+            exit 0
+          fi
+          tested_tree="$(gh api "repos/$REPO/actions/runs/$run_id/artifacts?name=tested-tree" --jq '.artifacts[0].name // empty')"
+          if [ -z "$tested_tree" ]; then
+            echo "run $run_id recorded no tree: full run"
+            exit 0
+          fi
+          artifact_id="$(gh api "repos/$REPO/actions/runs/$run_id/artifacts?name=tested-tree" --jq '.artifacts[0].id')"
+          gh api "repos/$REPO/actions/artifacts/$artifact_id/zip" > tree.zip
+          recorded="$(unzip -p tree.zip tree.txt | tr -d '[:space:]')"
+          if [ "$recorded" = "$queue_tree" ]; then
+            echo "queue tree $queue_tree was tested by run $run_id: skipping the repeat"
+            echo skip=true >> "$GITHUB_OUTPUT"
+          else
+            echo "queue tree $queue_tree differs from the tested tree $recorded: full run"
+          fi
+
   lint:
+    if: ${{ !cancelled() && needs.gate.outputs.skip != 'true' }}
+    needs: gate
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -82,6 +131,8 @@ jobs:
   # runner, not two. The Unix 100% coverage gate is in that leg: run `make coverage` before a pull
   # request, or the queue finds the gap.
   test:
+    if: ${{ !cancelled() && needs.gate.outputs.skip != 'true' }}
+    needs: gate
     strategy:
       fail-fast: false
       matrix:
@@ -157,6 +208,8 @@ jobs:
 
   # The macOS end-to-end tests run in the macOS test leg above.
   e2e:
+    if: ${{ !cancelled() && needs.gate.outputs.skip != 'true' }}
+    needs: gate
     strategy:
       fail-fast: false
       matrix:
@@ -181,6 +234,8 @@ jobs:
         run: ${{ matrix.e2e-command }}
 
   release-check:
+    if: ${{ !cancelled() && needs.gate.outputs.skip != 'true' }}
+    needs: gate
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -204,21 +259,50 @@ jobs:
         run: scripts/check-release-artifacts.ps1
 
   # The one check branch protection and the merge queue require. It passes only when every job
-  # above succeeded, so adding or renaming a job never needs a branch protection change. No job
-  # above is skipped by design; a skipped one (a failed dependency, say) fails this check too.
+  # above succeeded, so adding or renaming a job never needs a branch protection change. A job is
+  # skipped only when the merge queue's gate proved the queue commit's tree already passed in the
+  # pull request run; any other skipped job (a failed dependency, say) fails this check too.
   ci-ok:
     if: always()
     needs:
+      - gate
       - lint
       - test
       - e2e
       - release-check
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
     steps:
       - name: Require every job
         env:
           RESULTS: ${{ toJSON(needs.*.result) }}
+          GATE: ${{ needs.gate.result }}
+          SKIPPED: ${{ needs.gate.outputs.skip }}
+          LINT: ${{ needs.lint.result }}
+          TEST: ${{ needs.test.result }}
+          E2E: ${{ needs.e2e.result }}
+          RELEASE: ${{ needs.release-check.result }}
         run: |
           echo "$RESULTS"
-          jq -e 'length == 4 and all(. == "success")' <<<"$RESULTS" >/dev/null
+          # The gate runs only in the merge queue, so it is "skipped" everywhere else.
+          [ "$GATE" = success ] || [ "$GATE" = skipped ]
+          for result in "$LINT" "$TEST" "$E2E" "$RELEASE"; do
+            # Only a gate that proved the tree was already tested may leave a job skipped.
+            [ "$result" = success ] || { [ "$SKIPPED" = true ] && [ "$GATE" = success ] && [ "$result" = skipped ]; }
+          done
+      - name: Record the tree this pull request run tested
+        if: success() && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TESTED_SHA: ${{ github.sha }}
+        run: gh api "repos/$REPO/git/commits/$TESTED_SHA" --jq .tree.sha > tree.txt
+      - name: Upload the tested tree
+        if: success() && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tested-tree
+          path: tree.txt
+          retention-days: 7
