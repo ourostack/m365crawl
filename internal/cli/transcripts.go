@@ -22,7 +22,7 @@ type transcriptsGroup struct {
 
 const transcriptsCommon = `A recorded meeting is one call. A call has one part for each stretch that was recorded or transcribed, and each part's transcript is a file of its own in SharePoint. The parts are listed from the recording notices in the meeting chat, which a sync already archived; listing and showing them reads only the archive.
 <meeting> is an event id or key (as calendar prints them), a meeting chat link or thread id, or a call id. A chat or an event can hold several recorded calls.
-A part's state is ok when its text is in the archive, not_fetched when it can be fetched and has not been, unfetchable when no file reference is cached for it, and otherwise the outcome of the last attempt (no_access, not_found, no_transcript, too_large, failed). reason says in one sentence why a part has no text. A meeting's state is fetched, partial, not_fetched or unfetchable.
+A part's state is ok when its text is in the archive, processing while Teams prepares its file, not_fetched when it can be fetched and has not been, unfetchable when no file reference is cached for it or Teams reports a failed recording, and otherwise the outcome of the last attempt (no_access, not_found, no_transcript, too_large, failed). reason says in one sentence why a part has no text. A meeting's state is fetched, partial, not_fetched or unfetchable; an unresolved processing or failed recording keeps it partial.
 Every result says where it came from: source is archive, and fetched_at says when each part's text was fetched.`
 
 // Help is the long help of the transcripts group, shared by its commands.
@@ -243,7 +243,7 @@ func ofListed(n, total int) string {
 func unfetchedCalls(calls []store.TranscriptCall) int {
 	n := 0
 	for _, c := range calls {
-		if c.State == store.CallPartial || c.State == store.CallNotFetched {
+		if fetchable, fetched := c.Fetchable(); fetched < fetchable {
 			n++
 		}
 	}

@@ -16,6 +16,35 @@ import (
 
 const tHost = "https://tenant.sharepoint.example.invalid"
 
+func TestTranscriptMapperUpgradeRetainsPendingAndFailedRecordings(t *testing.T) {
+	s := newStore(t)
+	ctx := context.Background()
+	for i, status := range []string{"Initial", "Failed"} {
+		content := tNotice("pending-call", "0", status, "Recording+Transcript", "", "")
+		content = strings.Replace(content, `<Identifiers>`, fmt.Sprintf(`<CallProcessingId value="recording-%d"/><Identifiers>`, i), 1)
+		s.tMessage(t, acctA, tThread, fmt.Sprint(i), transcripts.TypeRecording, "2026-11-03T10:00:00.000Z", content)
+	}
+	s.qExec(t, `insert into meta(key,value) values('transcript_parts_mapper','1')`)
+	counts, err := s.EnsureTranscriptParts(ctx)
+	if err != nil || counts[tAcctA].Parts != 2 || counts[tAcctA].Unresolved != 2 || counts[tAcctA].AMSOnly != 0 {
+		t.Fatalf("mapper did not discover unfinished recordings: %+v, %v", counts, err)
+	}
+	calls, _, err := s.TranscriptCalls(ctx, TranscriptFilter{Account: &acctA})
+	if err != nil || len(calls) != 1 || calls[0].State != CallPartial || len(calls[0].Parts) != 2 {
+		t.Fatalf("unfinished call: %+v, %v", calls, err)
+	}
+	states := map[string]bool{}
+	for _, part := range calls[0].Parts {
+		states[part.State()] = true
+		if part.Fetchable || part.Reason == "" {
+			t.Fatalf("unfinished part: %+v", part)
+		}
+	}
+	if !states[transcripts.StateProcessing] || !states[transcripts.StateUnfetchable] {
+		t.Fatalf("source states lost: %v", states)
+	}
+}
+
 // tNotice is a synthetic recording notice. ref is "drive:<item>" for a part with its own drive
 // item, "share:<token>" for one with only a sharing link, and anything else for one with neither.
 func tNotice(call, chunk, status, types, stamp, ref string) string {

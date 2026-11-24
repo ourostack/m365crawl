@@ -96,7 +96,7 @@ func TestSyncReportsTranscriptCounts(t *testing.T) {
 	if got := partRows(t, db); got != "call-a#1 drive_item; call-a#2 drive_item; call-b#1 ams_only; call-c#1 unresolved" {
 		t.Fatalf("parts: %s", got)
 	}
-	if got := queryStr(t, db, `select value from meta where key='transcript_parts_mapper'`); got != "1" {
+	if got := queryStr(t, db, `select value from meta where key='transcript_parts_mapper'`); got != "2" {
 		t.Fatalf("mapper %q", got)
 	}
 	raw, err := json.Marshal(r)

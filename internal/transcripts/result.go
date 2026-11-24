@@ -24,6 +24,7 @@ const (
 const (
 	// StateNotFetched is a part a fetch can ask for and has not yet.
 	StateNotFetched = "not_fetched"
+	StateProcessing = "processing"
 	// StateUnfetchable is a part with no reference a fetch can use.
 	StateUnfetchable = "unfetchable"
 )
@@ -46,6 +47,8 @@ func PartState(p Part, fetchState string, hasText bool) string {
 	switch {
 	case hasText:
 		return StateOK
+	case p.RefQuality == RefProcessing:
+		return StateProcessing
 	case !p.Fetchable():
 		return StateUnfetchable
 	case fetchState == "" || fetchState == StateOK:
@@ -59,6 +62,8 @@ func Reason(p Part, state string) string {
 	switch state {
 	case StateOK:
 		return ""
+	case StateProcessing:
+		return "recording still processing in Teams; run m365crawl sync again in a few minutes"
 	case StateUnfetchable:
 		switch p.RefQuality {
 		case RefDriveItem:
@@ -71,6 +76,8 @@ func Reason(p Part, state string) string {
 			return "only a Teams media-service link is cached; it is not a SharePoint file"
 		case RefUnresolved:
 			return "Teams posted a transcript notice but no file reference"
+		case RefRecordingFailed:
+			return "Teams reported that this recording failed"
 		}
 		return "the cached file reference is malformed"
 	case StateNoAccess:

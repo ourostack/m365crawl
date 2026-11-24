@@ -17,16 +17,63 @@ func stampOf(name string) string {
 	return m[1] + m[2]
 }
 
+func recordingIdentity(p Part) string {
+	if p.ProcessingID != "" {
+		return "id:" + p.ProcessingID
+	}
+	return recordingStart(p)
+}
+
+func recordingStart(p Part) string {
+	if stamp := stampOf(p.OriginalName); stamp != "" {
+		return "start:" + stamp
+	}
+	if !p.StartsAt.IsZero() {
+		return "start:" + p.StartsAt.UTC().Format("20060102150405.999999999")
+	}
+	return ""
+}
+
 // Assemble turns the parts read from one account's notices into that account's rows. Two notices
 // of the same file of a call are one part, and the later notice wins. Each call's parts are
 // numbered from 1 by start time; equal start times fall back to the stamp in the file name, then
 // to the notice's send time, then to its message id. A call in notices that has no part carrying a
 // transcript gets one row of quality RefUnresolved after its parts, so it is listed, not dropped.
 // The rows come back by call id, then ordinal.
+// Identifiable processing/failed notices keep a place until a ready notice binds the same recording.
 func Assemble(parts []Part, notices map[string]Notice) []Part {
 	type key struct{ call, part string }
 	latest := map[key]Part{}
+	ready := map[key]bool{}
+	readyStart := map[key]map[string]string{}
 	for _, p := range parts {
+		if p.RefQuality == RefProcessing || p.RefQuality == RefRecordingFailed {
+			continue
+		}
+		if id := recordingIdentity(p); id != "" {
+			ready[key{p.CallID, id}] = true
+		}
+		if start := recordingStart(p); start != "" {
+			k := key{p.CallID, start}
+			if readyStart[k] == nil {
+				readyStart[k] = map[string]string{}
+			}
+			readyStart[k][p.PartKey] = p.ProcessingID
+		}
+	}
+	for _, p := range parts {
+		if p.RefQuality == RefProcessing || p.RefQuality == RefRecordingFailed {
+			matches := readyStart[key{p.CallID, recordingStart(p)}]
+			matched := p.ProcessingID != "" && ready[key{p.CallID, recordingIdentity(p)}]
+			if len(matches) == 1 {
+				for _, id := range matches {
+					matched = matched || p.ProcessingID == "" || id == ""
+				}
+			}
+			if matched {
+				continue
+			}
+		}
 		k := key{p.CallID, p.PartKey}
 		old, seen := latest[k]
 		if !seen || p.SentAt.After(old.SentAt) || (p.SentAt.Equal(old.SentAt) && p.MessageID > old.MessageID) {
@@ -40,7 +87,7 @@ func Assemble(parts []Part, notices map[string]Notice) []Part {
 	for call, n := range notices {
 		has := false
 		for _, p := range byCall[call] {
-			has = has || p.HasTranscript()
+			has = has || p.HasTranscript() || p.RefQuality == RefProcessing || p.RefQuality == RefRecordingFailed
 		}
 		if !has {
 			byCall[call] = append(byCall[call], Part{CallID: call, ThreadID: n.ThreadID, MessageID: n.MessageID, SentAt: n.SentAt,
@@ -73,6 +120,7 @@ func Assemble(parts []Part, notices map[string]Notice) []Part {
 		})
 		for i := range ps {
 			ps[i].Ordinal = i + 1
+			ps[i].ProcessingID = "" // only the source notices need this correlation field
 		}
 		out = append(out, ps...)
 	}

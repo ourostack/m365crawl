@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -82,14 +83,51 @@ func TestParseRecordingAMSOnly(t *testing.T) {
 }
 
 func TestParseRecordingNonSuccess(t *testing.T) {
-	for _, name := range []string{"initial", "chunk_finished"} {
-		if p, ok, err := ParseRecording("m", "t", fixture(t, name), sent); ok || err != nil || p != (Part{}) {
-			t.Fatalf("%s: %+v, %v, %v", name, p, ok, err)
-		}
+	if p, ok, err := ParseRecording("m", "t", fixture(t, "initial"), sent); ok || err != nil || p != (Part{}) {
+		t.Fatalf("unidentified initial: %+v, %v, %v", p, ok, err)
+	}
+	p, ok, err := ParseRecording("m", "t", fixture(t, "chunk_finished"), sent)
+	if !ok || err != nil || p.RefQuality != RefProcessing || p.Fetchable() {
+		t.Fatalf("chunk finished: %+v, %v, %v", p, ok, err)
 	}
 	// A recording message that is call-log metadata, not a notice, is no part and no failure.
 	if _, ok, err := ParseRecording("m", "t", `{"CallId":"x","ThreadId":"y"}`, sent); ok || err != nil {
 		t.Fatalf("metadata: %v, %v", ok, err)
+	}
+}
+
+func TestParseRecordingProcessingIdentityAndFailure(t *testing.T) {
+	for _, identity := range []string{
+		`<CallProcessingId value="recording-2"/>`,
+		`<CallProcessingId v="recording-2"/>`,
+		`<CallProcessingId>recording-2</CallProcessingId>`,
+		`<Identifiers><Id type="callProcessingId" value="recording-2"/></Identifiers>`,
+	} {
+		initial := `<URIObject>` + identity + `<Identifiers><Id type="callId" value="call-2"/></Identifiers><RecordingStatus status="Initial"/></URIObject>`
+		p, ok, err := ParseRecording("initial", "thread", initial, sent)
+		if !ok || err != nil || p.ProcessingID != "recording-2" || p.RefQuality != RefProcessing || p.Fetchable() || PartState(p, "", false) != StateProcessing {
+			t.Fatalf("initial: %+v, %v, %v", p, ok, err)
+		}
+		if reason := Reason(p, StateProcessing); reason != "recording still processing in Teams; run m365crawl sync again in a few minutes" {
+			t.Fatalf("processing reason: %q", reason)
+		}
+		failed, ok, err := ParseRecording("failed", "thread", strings.Replace(initial, `"Initial"`, `"Failed"`, 1), sent.Add(time.Minute))
+		if !ok || err != nil || failed.PartKey != p.PartKey || PartState(failed, "", false) != StateUnfetchable ||
+			Reason(failed, StateUnfetchable) != "Teams reported that this recording failed" {
+			t.Fatalf("failed: %+v, %v, %v", failed, ok, err)
+		}
+		unknown := strings.Replace(initial, `"Initial"`, `"Unknown"`, 1)
+		if _, ok, err := ParseRecording("unknown", "thread", unknown, sent); ok || err != nil {
+			t.Fatalf("unknown status: %v, %v", ok, err)
+		}
+	}
+	name := `<URIObject><OriginalName v="Meeting-20261103_100200UTC.mp4"/><Identifiers><Id type="callId" value="call-2"/></Identifiers><RecordingStatus status="ChunkFinished"/></URIObject>`
+	p, ok, err := ParseRecording("name", "thread", name, sent)
+	if !ok || err != nil || p.PartKey == "" || p.RefQuality != RefProcessing {
+		t.Fatalf("name identity: %+v, %v, %v", p, ok, err)
+	}
+	if _, ok, err := ParseRecording("no-call", "thread", `<URIObject><CallProcessingId value="r"/><RecordingStatus status="Initial"/></URIObject>`, sent); ok || !errors.Is(err, ErrUnparsable) {
+		t.Fatalf("processing without a call: %v, %v", ok, err)
 	}
 }
 

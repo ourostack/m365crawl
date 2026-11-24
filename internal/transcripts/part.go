@@ -26,16 +26,22 @@ const (
 	RefAMSOnly = "ams_only"
 	// RefUnresolved stands for a call that has a transcript notice and no part with a transcript.
 	RefUnresolved = "unresolved"
+	// RefProcessing is a recording notice whose file is not ready.
+	RefProcessing = "processing"
+	// RefRecordingFailed is a recording Teams reports as failed.
+	RefRecordingFailed = "recording_failed"
 )
 
 // PartsMapper numbers how the notices are turned into parts. It is stored as
 // meta.transcript_parts_mapper; raise it when ParseRecording or Assemble changes what they derive,
 // and the next sync rebuilds the parts of every account.
-const PartsMapper = 1
+const PartsMapper = 2
 
-// Part is one recorded part of a call, as the Success notice of its recording describes it.
+// Part is one recorded part of a call, including a recording awaiting its file.
 type Part struct {
 	AccountID, CallID, ThreadID, MessageID, PartKey string
+	// ProcessingID links pre-publication notices to Success during assembly, not storage.
+	ProcessingID string
 	// Ordinal is the part's place in its call, from 1, in time order.
 	Ordinal         int
 	StartsAt        time.Time

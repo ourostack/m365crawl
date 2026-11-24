@@ -1721,8 +1721,8 @@ Read meeting transcripts offline. A recorded meeting is one call. A call has one
 
 `<meeting>` is an event id or key (as `calendar` prints them), a meeting chat link or thread id, or a call id. A chat or an event can hold several recorded calls. One that names no recorded call is the `unknown_meeting` error (exit 2).
 
-- **A part's `state`** is `ok` when its text is in the archive, `not_fetched` when it can be fetched and has not been, `unfetchable` when no file reference is cached for it, and otherwise the outcome of the last attempt (`no_access`, `not_found`, `no_transcript`, `too_large`, `failed`). `reason` says in one sentence why a part has no text; a part not fetched yet says `not fetched yet; run m365crawl transcripts fetch <call-id>`.
-- **A meeting's `state`** is `fetched` (every part that can be fetched has text), `partial`, `not_fetched` or `unfetchable` (no part can be fetched by ids).
+- **A part's `state`** is `ok` when its text is in the archive, `processing` while Teams prepares its file, `not_fetched` when it can be fetched and has not been, `unfetchable` when no file reference is cached for it or Teams reports a failed recording, and otherwise the outcome of the last attempt (`no_access`, `not_found`, `no_transcript`, `too_large`, `failed`). `reason` says in one sentence why a part has no text; a part not fetched yet says `not fetched yet; run m365crawl transcripts fetch <call-id>`. Processing parts say to run `m365crawl sync` again in a few minutes.
+- **A meeting's `state`** is `fetched` (every part that can be fetched has text and no recording remains processing or failed), `partial`, `not_fetched` or `unfetchable` (no part can be fetched by ids). Identifiable processing and failed recordings count in `parts_total` and keep the meeting `partial`; `transcripts show` includes their empty segments and returns `complete: false`. A later ready notice replaces the pending part without losing fetched text.
 - **Where it came from.** Every result has `"source": "archive"`, and `fetched_at` says when each part's text was fetched. Text output ends with `source: archive`.
 
 ```

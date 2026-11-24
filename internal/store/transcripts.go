@@ -20,8 +20,8 @@ import (
 const transcriptMapperKey = "transcript_parts_mapper"
 
 // TranscriptCounts is what the transcript parts of one or more accounts add up to after a
-// derivation. Parts leaves out the rows that stand for an unresolved call, which Unresolved
-// counts; Unparsable counts the recording notices that could not be read.
+// derivation. Parts leaves out unresolved-call placeholders. Unresolved counts those placeholders
+// and recordings still processing or failed; Unparsable counts notices that could not be read.
 type TranscriptCounts struct {
 	Calls      int `json:"calls"`
 	Parts      int `json:"parts"`
@@ -106,6 +106,10 @@ func deriveTranscriptParts(ctx context.Context, tx *sql.Tx, accounts []string) (
 			switch p.RefQuality {
 			case transcripts.RefUnresolved:
 				n.Unresolved++
+				continue
+			case transcripts.RefProcessing, transcripts.RefRecordingFailed:
+				n.Unresolved++
+				n.Parts++
 				continue
 			case transcripts.RefDriveItem:
 				n.DriveItem++
@@ -492,7 +496,13 @@ func scanParts(rows *sql.Rows) ([]TranscriptCall, error) {
 				c.StartedAt = at
 			}
 		}
+		pending := false
+		for _, p := range c.Parts {
+			pending = pending || p.RefQuality == transcripts.RefProcessing || p.RefQuality == transcripts.RefRecordingFailed
+		}
 		switch fetchable, fetched := c.Fetchable(); {
+		case pending:
+			c.State = CallPartial
 		case fetchable == 0:
 			c.State = CallUnfetchable
 		case fetched == fetchable:

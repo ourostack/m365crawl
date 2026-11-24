@@ -104,3 +104,56 @@ func TestAssembleMultiDrive(t *testing.T) {
 		t.Fatal("no notices, no rows")
 	}
 }
+
+func TestAssembleProcessingToSuccess(t *testing.T) {
+	ready := drivePart("c", "one", "ready", at(10, 0), at(11, 0))
+	ready.ProcessingID = "one"
+	pending := Part{CallID: "c", PartKey: "p:two", ProcessingID: "two", RefQuality: RefProcessing, StartsAt: at(10, 30), SentAt: at(11, 1)}
+	finished := pending
+	finished.MessageID, finished.SentAt, finished.ContentTypes = "finished", at(11, 2), "Recording+Transcript"
+	got := Assemble([]Part{finished, ready, pending}, map[string]Notice{"c": {MessageID: "transcript"}})
+	if len(got) != 2 || got[1].MessageID != "finished" || got[1].RefQuality != RefProcessing {
+		t.Fatalf("pending recording: %+v", got)
+	}
+	success := drivePart("c", "two", "success", at(10, 30), at(11, 3))
+	success.ProcessingID = "two"
+	// The file name may change timezones; the processing id still binds the recording.
+	success.OriginalName = "Meeting-20261103_023000.mp4"
+	for _, parts := range [][]Part{{pending, success, finished, ready}, {ready, finished, success, pending}} {
+		got = Assemble(parts, nil)
+		if len(got) != 2 || got[1].PartKey != success.PartKey {
+			t.Fatalf("resolved: %+v", got)
+		}
+	}
+	failed := finished
+	failed.RefQuality, failed.SentAt = RefRecordingFailed, at(11, 4)
+	if got := Assemble([]Part{pending, failed}, nil); len(got) != 1 || got[0].RefQuality != RefRecordingFailed {
+		t.Fatalf("failed notice: %+v", got)
+	}
+}
+
+func TestAssembleProcessingFallbackIsScopedAndUnambiguous(t *testing.T) {
+	pending := Part{CallID: "c", PartKey: "p:two", RefQuality: RefProcessing, OriginalName: "Meeting-20261103_103000UTC.mp4"}
+	success := drivePart("c", "two", "success", at(10, 30), at(11, 3))
+	for _, ids := range [][2]string{{"", ""}, {"two", ""}, {"", "two"}} {
+		pending.ProcessingID, success.ProcessingID = ids[0], ids[1]
+		if got := Assemble([]Part{pending, success}, nil); len(got) != 1 || got[0].PartKey != success.PartKey {
+			t.Fatalf("fallback: %+v", got)
+		}
+	}
+	pending.ProcessingID, success.ProcessingID = "different", "two"
+	if got := Assemble([]Part{pending, success}, nil); len(got) != 2 {
+		t.Fatalf("different processing ids merged: %+v", got)
+	}
+	pending.ProcessingID = ""
+	other := success
+	other.CallID = "other"
+	if got := Assemble([]Part{pending, other}, nil); len(got) != 2 {
+		t.Fatalf("different calls merged: %+v", got)
+	}
+	other = success
+	other.PartKey, other.ProcessingID = "d:drive/other", "other"
+	if got := Assemble([]Part{pending, success, other}, nil); len(got) != 3 {
+		t.Fatalf("ambiguous start hid pending recording: %+v", got)
+	}
+}
