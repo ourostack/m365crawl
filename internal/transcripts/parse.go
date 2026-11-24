@@ -20,8 +20,8 @@ var ErrUnparsable = errors.New("the recording notice cannot be parsed")
 // drive id, item id and transcript id.
 var transcriptURI = regexp.MustCompile(`^https://([^/]+)(/(?:teams|sites|personal)/[^/]+)/_api/v2\.1/drives/([^/]+)/items/([^/]+)/versions/current/media/transcripts/([^/]+)/content$`)
 
-// ParseRecording reads the recording notice of one chat message. ok is false for a notice whose
-// status is not Success (such a notice carries no link) and for a message with no notice markup.
+// ParseRecording reads a ready, processing or failed recording notice from one chat message.
+// Notices with no recording identity or an unknown status are not parts.
 // err is ErrUnparsable when the markup cannot be read, or names no call.
 func ParseRecording(messageID, threadID, contentHTML string, sentAt time.Time) (p Part, ok bool, err error) {
 	at := strings.Index(contentHTML, "<URIObject")
@@ -32,7 +32,9 @@ func ParseRecording(messageID, threadID, contentHTML string, sentAt time.Time) (
 	if err != nil {
 		return Part{}, false, err
 	}
-	if n.status != "Success" {
+	switch n.status {
+	case "Success", "Initial", "ChunkFinished", "Failed":
+	default:
 		return Part{}, false, nil
 	}
 	if n.ids["callId"] == "" {
@@ -43,9 +45,24 @@ func ParseRecording(messageID, threadID, contentHTML string, sentAt time.Time) (
 		StartsAt: parseStamp(n.timestamp), DurationSeconds: parseDuration(n.duration),
 		ContentTypes: n.contentTypes, ChunkIndex: n.ids["chunkIndex"],
 		StorageKind: n.storage, MeetingICalUID: n.icalUID, OriginalName: n.originalName,
-		ShareURL: n.href,
+		ShareURL: n.href, ProcessingID: n.processingID,
 	}
 	p.TranscribeOnly = p.ChunkIndex == "10001" || !strings.Contains(p.ContentTypes, "Recording")
+	if n.status != "Success" {
+		if p.ContentTypes == "" {
+			p.TranscribeOnly = false
+		}
+		identity := recordingIdentity(p)
+		if identity == "" {
+			return Part{}, false, nil
+		}
+		sum := sha256.Sum256([]byte(p.CallID + "\x00" + identity))
+		p.PartKey, p.RefQuality = "p:"+hex.EncodeToString(sum[:]), RefProcessing
+		if n.status == "Failed" {
+			p.RefQuality = RefRecordingFailed
+		}
+		return p, true, nil
+	}
 	if p.ShareURL == "" {
 		p.ShareURL = n.items["onedriveForBusinessVideo"]
 	}
@@ -64,9 +81,9 @@ func ParseRecording(messageID, threadID, contentHTML string, sentAt time.Time) (
 
 // notice is what a recording notice says, as read from its markup.
 type notice struct {
-	status, contentTypes, timestamp, duration string
-	href, originalName, storage, icalUID      string
-	ids, items                                map[string]string
+	status, contentTypes, timestamp, duration          string
+	href, originalName, storage, icalUID, processingID string
+	ids, items                                         map[string]string
 }
 
 func attr(e xml.StartElement, name string) string {
@@ -85,7 +102,7 @@ func readNotice(markup string) (notice, error) {
 	d := xml.NewDecoder(strings.NewReader(markup))
 	d.Strict = false
 	d.Entity = xml.HTMLEntity
-	depth, inIDs, inContent := 0, false, false
+	depth, inIDs, inContent, inProcessingID := 0, false, false, false
 	for {
 		tok, err := d.Token()
 		if err != nil {
@@ -103,6 +120,12 @@ func readNotice(markup string) (notice, error) {
 				}
 			case "RecordingStatus":
 				n.status = attr(t, "status")
+			case "CallProcessingId":
+				inProcessingID = true
+				n.processingID = attr(t, "value")
+				if n.processingID == "" {
+					n.processingID = attr(t, "v")
+				}
 			case "RecordingContent":
 				inContent = true
 				n.contentTypes, n.timestamp, n.duration = attr(t, "contentTypes"), attr(t, "timestamp"), attr(t, "duration")
@@ -121,6 +144,10 @@ func readNotice(markup string) (notice, error) {
 			case "MeetingICalUid":
 				n.icalUID = attr(t, "value")
 			}
+		case xml.CharData:
+			if inProcessingID {
+				n.processingID += strings.TrimSpace(string(t))
+			}
 		case xml.EndElement:
 			depth--
 			switch t.Name.Local {
@@ -128,8 +155,13 @@ func readNotice(markup string) (notice, error) {
 				inIDs = false
 			case "RecordingContent":
 				inContent = false
+			case "CallProcessingId":
+				inProcessingID = false
 			}
 			if depth == 0 {
+				if n.processingID == "" {
+					n.processingID = n.ids["callProcessingId"]
+				}
 				return n, nil
 			}
 		}

@@ -132,6 +132,74 @@ func trEnv(t *testing.T) *env {
 	return e
 }
 
+func TestTranscriptsPendingRecordingBlocksCompleteness(t *testing.T) {
+	e := trEnv(t)
+	ctx := context.Background()
+	add := func(id, status, ref string) {
+		html := strings.Replace(trNotice("call-2", "0", "Recording+Transcript", "2026-11-10T10:30:00Z", ref),
+			`status="Success"`, `status="`+status+`"`, 1)
+		html = strings.Replace(html, `<Identifiers>`, `<CallProcessingId value="recording-second"/><Identifiers>`, 1)
+		e.exec(`insert into messages(tenant_id,user_id,conversation_id,id,sent_at,message_type,content_html,updated_at) values('` +
+			tenantA + `','` + userA + `','` + trWeekly + `','` + id + `','2026-11-10T11:10:00.000Z','` +
+			transcripts.TypeRecording + `','` + html + `','2026-11-10T11:10:00.000Z')`)
+	}
+	derive := func() {
+		st, err := store.Open(ctx, e.db)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = st.Close() }()
+		sess, err := st.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer sess.Rollback()
+		if _, err := sess.DeriveTranscriptParts(ctx, []string{trAccount}); err != nil {
+			t.Fatal(err)
+		}
+		if err := sess.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("pending-initial", "Initial", "")
+	add("pending-finished", "ChunkFinished", "")
+	derive()
+	list := trJSON(t, e, "transcripts", "call-2")["items"].([]any)[0].(map[string]any)
+	if list["parts_total"] != float64(2) || list["parts_fetched"] != float64(1) || list["state"] != "partial" {
+		t.Fatalf("unfinished recording omitted: %v", list)
+	}
+	parts := list["parts"].([]any)
+	pending := parts[1].(map[string]any)
+	if pending["state"] != "processing" || pending["fetchable"] != false || pending["reason"] == nil {
+		t.Fatalf("pending part: %v", pending)
+	}
+	show := trJSON(t, e, "transcripts", "show", "call-2")
+	if show["complete"] != false || len(show["segments"].([]any)) != 2 {
+		t.Fatalf("unfinished recording marked complete: %v", show)
+	}
+	add("pending-success", "Success", "drive:Q2")
+	derive()
+	list = trJSON(t, e, "transcripts", "call-2")["items"].([]any)[0].(map[string]any)
+	parts = list["parts"].([]any)
+	if list["parts_total"] != float64(2) || parts[1].(map[string]any)["state"] != "not_fetched" {
+		t.Fatalf("placeholder did not resolve: %v", list)
+	}
+	st, err := store.Open(ctx, e.db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SaveTranscript(ctx, trAccount, "d:b!d1/Q2", transcripts.FetchResult{
+		State: transcripts.StateOK, At: trFetchedAt, Entries: []transcripts.Entry{{Text: "Second recording."}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	show = trJSON(t, e, "transcripts", "show", "call-2")
+	if show["complete"] != true || len(show["segments"].([]any)[0].(map[string]any)["entries"].([]any)) != 1 {
+		t.Fatalf("resolved recording lost prior fetched text: %v", show)
+	}
+}
+
 func (e *env) tr(args ...string) (int, string, string) {
 	return e.run(append([]string{"--no-sync"}, args...)...)
 }
