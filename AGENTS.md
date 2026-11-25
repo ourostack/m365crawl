@@ -15,6 +15,7 @@
 2. Make the first cut restraint: for each thing, name the job it serves and ask what breaks if it goes; if nothing does, leave it out and say why. Give each job one way in, not one per item or function, and extend the one that exists before adding another.
 3. Build what is left well, the basics people use daily among it, for the person and for agents, with a result that says what it did.
 4. Write how fresh people or fresh agents doing a real job will prove it, and rerun them after each small change.
+5. Before you show a scope or design, follow the [`the-bar` skill](.agents/skills/the-bar/SKILL.md): a fresh agent that didn't write it checks every item against these steps, and you fix what it finds.
 <!-- /ouro-ui:bar -->
 
 - **[Images must load on the recipient's phone](https://github.com/ourostack/.github/blob/main/agents/images-load-on-mobile.md).** Attach images with the platform's own attachment (never a blob/ or raw.githubusercontent.com link, never a copy to a public place), and say only what was observed: a served upload is not a rendered page, and native Mobile and Teams rendering is unverified.
