@@ -12,9 +12,9 @@ require (
 	github.com/mattn/go-runewidth v0.0.31
 	github.com/openclaw/crawlkit v0.18.0
 	github.com/syndtr/goleveldb v1.0.0
-	golang.org/x/net v0.62.0
+	golang.org/x/net v0.63.0
 	golang.org/x/sys v0.50.0
-	modernc.org/sqlite v1.62.0
+	modernc.org/sqlite v1.63.0
 )
 
 require (
