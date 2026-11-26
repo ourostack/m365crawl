@@ -1,0 +1,3 @@
+{
+  "ignore": ["upstream-sources.lock.json", "AGENTS.md"]
+}

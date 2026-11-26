@@ -8,8 +8,6 @@ on:
     workflows: [CI]
     types: [completed]
     branches: [main]
-  schedule:
-    - cron: "4-59/10 * * * *"
   workflow_dispatch:
 
 # The shared workflow declares contents and pull-requests write, and a caller cannot grant less; rerun-only mode uses none of it.
