@@ -11,6 +11,8 @@
 [![Release](https://img.shields.io/github/v/release/ourostack/m365crawl?style=flat-square)](https://github.com/ourostack/m365crawl/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey?style=flat-square)](https://github.com/ourostack/m365crawl/releases)
 
+> **m365crawl is in maintenance mode.** It gets fixes for breakage and security updates, and no new features. Releases and Homebrew keep working.
+
 [Install](#install) · [Usage guide](docs/guide.md) · [Spec](SPEC.md) · [Releases](https://github.com/ourostack/m365crawl/releases) · [More from Ouro](https://github.com/ourostack)
 
 ```sh

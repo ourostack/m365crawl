@@ -4,8 +4,6 @@ name: Cancel orphaned merge-group runs
 # wait for. This cancels the runs whose group commit is no longer a queue entry, with this repository's own token.
 # The rule: ourostack/.github tools/orphan-runs/README.md.
 on:
-  schedule:
-    - cron: "*/10 * * * *"
   merge_group:
   workflow_dispatch:
 
