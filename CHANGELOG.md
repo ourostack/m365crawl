@@ -4,6 +4,12 @@ All notable changes to m365crawl are recorded here. The format follows [Keep a C
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-11-26
+
+### Fixed
+
+- Transcript listings include identifiable recordings still processing in Teams, with a reason to sync again. Processing and failed recordings keep the meeting partial and `transcripts show` incomplete until a ready notice resolves them; previously fetched parts remain intact.
+
 ## [1.7.0] - 2026-11-20
 
 ### Added
