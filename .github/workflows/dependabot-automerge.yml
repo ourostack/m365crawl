@@ -1,6 +1,6 @@
 name: Dependabot auto-merge
 
-# Turns on auto-merge (squash) for Dependabot pull requests that update Go modules by a
+# Turns on auto-merge for Dependabot pull requests that update Go modules by a
 # semver patch or minor, so each merges when the required checks pass. Nothing else
 # auto-merges: GitHub Actions updates (a moved upstream tag could reach the job that holds the
 # Apple secrets) and major versions stay open for a human to read. The decision is
@@ -45,8 +45,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-        run: |
-          # An explicit message: GitHub's default appends bot Co-authored-by lines, which the ruleset rejects.
-          subject=$(gh pr view "$PR_URL" --json title,number --jq '"\(.title) (#\(.number))"')
-          message=$(gh pr view "$PR_URL" --json body --jq .body | tr -d '\r' | grep -v -i -E '^[[:space:]]*[A-Za-z-]+-by[[:space:]]*:.*(\[bot\]|(^|[^A-Za-z0-9])(copilot|claude|anthropic|openai|chatgpt|gpt|codex|gemini|cursor|devin|aider)([^A-Za-z]|$))' || true)
-          gh pr merge --auto --squash --subject "$subject" --body "$message" "$PR_URL"
+        # No explicit message, so the org's rearm-merges job (ourostack/.github) re-arms it with a person's token: an
+        # auto-merge GITHUB_TOKEN turned on was never seen to join the merge queue (#649).
+        run: gh pr merge --auto --squash "$PR_URL"
