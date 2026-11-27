@@ -11,7 +11,7 @@
 [![Release](https://img.shields.io/github/v/release/ourostack/m365crawl?style=flat-square)](https://github.com/ourostack/m365crawl/releases/latest)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey?style=flat-square)](https://github.com/ourostack/m365crawl/releases)
 
-> **m365crawl is in maintenance mode.** It gets fixes for breakage and security updates, and no new features. Releases and Homebrew keep working.
+> **m365crawl is in maintenance mode, because something new is on its way.** We can't say what yet. 🤫 Until it lands, m365crawl keeps working: it gets fixes for breakage and security updates, and releases and Homebrew stay put. Watch this repo and you'll hear here first.
 
 [Install](#install) · [Usage guide](docs/guide.md) · [Spec](SPEC.md) · [Releases](https://github.com/ourostack/m365crawl/releases) · [More from Ouro](https://github.com/ourostack)
 
@@ -119,11 +119,11 @@ m365crawl workiq disable
 
 Replace `outlook/Main` with a profile from your archive. Mail sync needs room for the whole mailbox (about 35 GB per 100,000 items) unless you fetch a date range with `--since` and `--until`; reads then say where each item came from (`provenance`). The rules, errors and limits are in [WorkIQ commands](docs/commands.md#workiq).
 
-## Scope and requesting support
+## Scope
 
-m365crawl is a complement to Graph and MCP tools, not a replacement: use those to send or react, retrieve data the desktop apps never cached, or work on an unsupported host or app. Support grows from the maintainer's own Microsoft 365 usage, so the name is the direction, not a claim that every app is supported. [`docs/scope.md`](docs/scope.md) separates shipped support from planned and deferred sources.
+m365crawl is a complement to Graph and MCP tools, not a replacement: use those to send or react, retrieve data the desktop apps never cached, or work on an unsupported host or app. The name is broad, not a claim that every app is supported. [`docs/scope.md`](docs/scope.md) lists what is supported.
 
-**Missing something you use?** Work with your agent to open a [prompt request](https://github.com/ourostack/m365crawl/issues/new?template=prompt-request.yml): describe the job you want the agent to do, the app, your operating system and what happens today. Search [existing issues](https://github.com/ourostack/m365crawl/issues) first, and never attach real mail, chats, cache files, archives, credentials or tokens.
+m365crawl takes no new sources or feature requests. If something that used to work breaks, [open an issue](https://github.com/ourostack/m365crawl/issues) and never attach real mail, chats, cache files, archives, credentials or tokens.
 
 ## Privacy
 
@@ -152,7 +152,7 @@ The archive holds your real chats, mail, meetings and explicitly retained cloud 
 - [`docs/full-disk-access.md`](docs/full-disk-access.md): why macOS asks and how to grant it.
 - [`docs/privacy.md`](docs/privacy.md): what m365crawl reads, stores and never touches.
 - [`docs/troubleshooting.md`](docs/troubleshooting.md): common problems and their fixes.
-- [`docs/scope.md`](docs/scope.md): shipped support, the roadmap and prompt requests.
+- [`docs/scope.md`](docs/scope.md): what is supported, and what to use instead.
 - [`docs/how-it-works.md`](docs/how-it-works.md): from the app caches to a SQLite row.
 - [`docs/outlook-store.md`](docs/outlook-store.md): the Outlook for Mac store layout, structure and counts only.
 - [`SPEC.md`](SPEC.md): the normative specification.
