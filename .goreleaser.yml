@@ -75,7 +75,11 @@ homebrew_casks:
       - m365crawl
     directory: Casks
     homepage: https://github.com/ourostack/m365crawl
-    description: Mirror the Microsoft Teams desktop cache into local SQLite for agents. Read-only, offline, no tokens.
+    description: Microsoft 365 for agents, in maintenance mode while something new takes shape
+    caveats: |
+      m365crawl is in maintenance mode, because something new is on its way.
+      It keeps working, and you'll hear at https://github.com/ourostack/m365crawl
+      when the new thing lands.
     license: MIT
     # The tap pulls the rendered cask from the release asset m365crawl.rb
     # (uploaded by release.yml), so goreleaser never pushes to the tap.
